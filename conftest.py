@@ -1,20 +1,20 @@
 import pytest
-from core.driver_factory import DriverFactory
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
-
-@pytest.fixture(scope="function")
-def driver(request):
-    logger.info("Initializing WebDriver...")
-    browser = request.config.getoption("--browser", default="chrome")
-    driver_instance = DriverFactory.get_driver(browser)
-    
-    yield driver_instance
-    
-    logger.info("Tearing down WebDriver...")
-    if driver_instance:
-        driver_instance.quit()
-
-def pytest_addoption(parser):
-    parser.addoption("--browser", action="store", default="chrome", help="Browser to run tests on")
+from selenium.common.exceptions import TimeoutException, WebDriverException
+# We hook into the report generation phase
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call" and report.failed:
+        # Check the exception that caused the crash
+        exception_info = str(call.excinfo.value)
+        failure_category = "Unknown Bug"
+        if isinstance(call.excinfo.value, TimeoutException):
+            failure_category = "Infrastructure Timeout / Flaky Network"
+        elif isinstance(call.excinfo.value, AssertionError):
+            failure_category = "Product Bug / Logic Failure"
+        elif isinstance(call.excinfo.value, WebDriverException):
+            failure_category = "Selenium Grid / Browser Crash"
+        # Attach this category to the report object
+        report.failure_category = failure_category
+        print(f"\n[Analytics] Test {item.name} failed due to: {failure_category}")
